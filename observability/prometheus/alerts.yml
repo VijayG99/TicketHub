@@ -1,0 +1,36 @@
+# S11 / S3: warning thresholds. Prometheus evaluates these; open http://localhost:9090/alerts to see them.
+groups:
+  - name: tickethub-messaging
+    rules:
+      - alert: ConsumerLagHigh
+        # Spring Kafka exposes the per-consumer lag; "max" is the worst partition seen by that consumer
+        expr: max by (application) (kafka_consumer_fetch_manager_records_lag_max) > 50
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.application }} is more than 50 messages behind on Kafka"
+      - alert: OutboxBacklog
+        # events written to the database but not yet published to Kafka (Kafka down or relay stuck)
+        expr: tickethub_outbox_unpublished > 20
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.application }} has {{ $value }} unpublished outbox events"
+      - alert: DeadLettersParked
+        # ST-77: any message that gave up needs a human decision (fix + replay)
+        expr: increase(tickethub_dead_letters_parked_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Messages were dead-lettered in {{ $labels.application }}: GET /notifications/dead-letters"
+      - alert: ReconciliationFlagged
+        # drift the reconciliation job could not repair
+        expr: increase(tickethub_reconciliation_flagged_total[10m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Payment and Booking disagree and reconciliation could not fix it: POST /payments/reconciliation/run and read the report"
+      - alert: EmailCircuitOpen
+        expr: resilience4j_circuitbreaker_state{name="emailProvider", state="open"} == 1
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "The email provider circuit is OPEN: confirmation emails are being retried / delayed"

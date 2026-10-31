@@ -1,0 +1,64 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5441/event_db
+    username: tickethub
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+tickethub:
+  media:
+    # Poster storage (ST-30): MinIO locally, AWS S3 in the cloud (same S3 API). Credentials come from env vars.
+    endpoint: http://localhost:9000
+    bucket: tickethub-media
+    region: us-east-1
+    path-style: true
+    public-base-url: http://localhost:9000/tickethub-media
+  clients:
+    booking-service:
+      base-url: http://booking-service
+      connect-timeout-ms: 1000
+      read-timeout-ms: 3000
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      bookingService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        ignore-exceptions:
+          - com.tickethub.event.common.exception.ResourceNotFoundException
+          - com.tickethub.event.common.exception.BusinessRuleException
+  retry:
+    instances:
+      bookingService:
+        max-attempts: 3
+        wait-duration: 300ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - com.tickethub.event.common.exception.DependencyUnavailableException
+          - com.tickethub.event.common.exception.DependencyTimeoutException

@@ -1,0 +1,57 @@
+# Shared by every service (local profile). NO secrets and no placeholders in this repository (ST-13).
+# Passwords/keys are supplied as environment variables to each service.
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  # Distributed tracing (ST-28): every request is sampled in this learning environment.
+  tracing:
+    sampling:
+      probability: 1.0
+  # Latency histograms so Grafana can compute p95/p99 (ST-27).
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: never
+  health:
+    mail:
+      enabled: false
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+spring:
+  datasource:
+    hikari:
+      # ST-78: bounded, observable connection pools. A small pool per service keeps RDS (max_connections) safe,
+      # and a short connection-timeout makes a database outage fail fast instead of hanging requests.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+      validation-timeout: 2000
+      max-lifetime: 1500000
+      leak-detection-threshold: 20000
+  kafka:
+    bootstrap-servers: localhost:29092
+    # trace context travels inside Kafka message headers (Booking -> Notification)
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true

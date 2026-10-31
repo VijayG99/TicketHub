@@ -1,0 +1,8 @@
+# Profile "stripe" (ST-22): real provider sandbox. Activate with TICKETHUB_PROFILES=docker,stripe
+# and STRIPE_SECRET_KEY=sk_test_... in .env. Never use a live (sk_live_) key.
+payment:
+  provider: stripe
+  # a real network call is slower than the simulator
+  provider-timeout-ms: 8000
+  simulator:
+    allow-client-outcome: false

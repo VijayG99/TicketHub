@@ -1,0 +1,23 @@
+# Prometheus (ST-27): scrapes every service's /actuator/prometheus inside the Docker network.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: tickethub
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["event-service:8081"]
+        labels: { application: event-service }
+      - targets: ["booking-service:8082"]
+        labels: { application: booking-service }
+      - targets: ["payment-service:8083"]
+        labels: { application: payment-service }
+      - targets: ["notification-service:8084"]
+        labels: { application: notification-service }
+      # the gateway serves actuator on its management port, not on 8080
+      - targets: ["apigate-service:8089"]
+        labels: { application: apigate-service }

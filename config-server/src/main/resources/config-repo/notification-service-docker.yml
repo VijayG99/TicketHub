@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://notification-db:5432/notification_db
+  mail:
+    host: mailhog
+    port: 1025
+
+notification:
+  sender: email

@@ -1,0 +1,11 @@
+# Profile "aws" (ST-31): database on Amazon RDS. Activate with TICKETHUB_PROFILES=docker,aws and
+# set EVENT_DB_HOST on the CONFIG SERVER container (the host name of the RDS instance).
+# The password is NOT stored here: it is injected as SPRING_DATASOURCE_PASSWORD from AWS Secrets Manager.
+spring:
+  datasource:
+    url: jdbc:postgresql://${EVENT_DB_HOST}:5432/event_db?sslmode=require
+
+tickethub:
+  media:
+    # ST-78: on AWS every poster is encrypted at rest (SSE-S3)
+    server-side-encryption: true

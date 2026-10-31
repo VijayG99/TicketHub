@@ -1,0 +1,20 @@
+server:
+  port: 8888
+
+spring:
+  application:
+    name: config-server
+  profiles:
+    active: native
+  cloud:
+    config:
+      server:
+        native:
+          # Config repository is baked into the image. No secrets live here (ST-13).
+          search-locations: classpath:/config-repo/
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

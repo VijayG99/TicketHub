@@ -1,0 +1,15 @@
+# Applied to every service when SPRING_PROFILES_ACTIVE=docker (integration environment).
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
+
+spring:
+  kafka:
+    bootstrap-servers: kafka:9092
+
+# Distributed tracing (ST-28): spans are exported to Jaeger over OTLP/HTTP.
+management:
+  otlp:
+    tracing:
+      endpoint: http://jaeger:4318/v1/traces

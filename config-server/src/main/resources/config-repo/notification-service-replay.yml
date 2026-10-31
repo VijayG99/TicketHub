@@ -1,0 +1,17 @@
+# S12 replay profile. Used ONLY by the "notification-replay" container (compose profile "replay").
+# A NEW consumer group has no committed offsets, so with auto-offset-reset=earliest it reads the
+# whole topic from the beginning. replay-mode=true makes it write records WITHOUT sending email.
+spring:
+  datasource:
+    # a SEPARATE empty database, so the replay really rebuilds records from scratch
+    url: jdbc:postgresql://notification-replay-db:5432/notification_db
+  kafka:
+    consumer:
+      group-id: notification-replay-group
+      auto-offset-reset: earliest
+eureka:
+  client:
+    enabled: false          # must not appear in Eureka, or the gateway would route traffic to it
+notification:
+  replay-mode: true
+  sender: log

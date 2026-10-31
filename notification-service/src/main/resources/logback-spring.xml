@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging (ST-25 / ST-26).
+  - local runs (no "docker" profile): readable text, includes [service,traceId,correlationId]
+  - docker profile: one JSON object per line (structured), with MDC fields traceId/spanId/correlationId
+  - "elk" profile (TICKETHUB_PROFILES=docker,elk): additionally ships the same JSON to Logstash over TCP
+  Set TICKETHUB_LOG_APPENDER=CONSOLE to get readable text logs inside Docker.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="app"/>
+
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}"}</customFields>
+        </encoder>
+    </appender>
+
+    <springProfile name="elk">
+        <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+            <destination>${LOGSTASH_DESTINATION:-logstash:5000}</destination>
+            <reconnectionDelay>10 seconds</reconnectionDelay>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${appName}"}</customFields>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <springProfile name="docker &amp; elk">
+        <root level="INFO">
+            <appender-ref ref="${TICKETHUB_LOG_APPENDER:-JSON}"/>
+            <appender-ref ref="LOGSTASH"/>
+        </root>
+    </springProfile>
+    <springProfile name="docker &amp; !elk">
+        <root level="INFO">
+            <appender-ref ref="${TICKETHUB_LOG_APPENDER:-JSON}"/>
+        </root>
+    </springProfile>
+    <springProfile name="!docker">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

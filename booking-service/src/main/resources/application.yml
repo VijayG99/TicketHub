@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: booking-service
+  config:
+    import: "configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
+  cloud:
+    config:
+      fail-fast: true
+
+# Only bootstrap values live here. Everything else comes from the Config Server.
+# Secrets are read from environment variables and are never committed.
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{correlationId:-}]"

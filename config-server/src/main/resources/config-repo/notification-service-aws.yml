@@ -1,0 +1,6 @@
+# Profile "aws" (ST-31): database on Amazon RDS. Activate with TICKETHUB_PROFILES=docker,aws and
+# set NOTIFICATION_DB_HOST on the CONFIG SERVER container (the host name of the RDS instance).
+# The password is NOT stored here: it is injected as SPRING_DATASOURCE_PASSWORD from AWS Secrets Manager.
+spring:
+  datasource:
+    url: jdbc:postgresql://${NOTIFICATION_DB_HOST}:5432/notification_db?sslmode=require

@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://event-db:5432/event_db
+
+tickethub:
+  media:
+    # inside Docker the service reaches MinIO by its service name; browsers use localhost:9000
+    endpoint: http://minio:9000

@@ -1,0 +1,104 @@
+server:
+  port: 8083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5443/payment_db
+    username: tickethub
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  kafka:
+    consumer:
+      # S5: Payment consumes Booking's rejection/cancellation events in its own group
+      group-id: payment-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      concurrency: 3
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 3000
+        request.timeout.ms: 2000
+        delivery.timeout.ms: 5000
+
+payment:
+  # S3: how often the outbox relay looks for unpublished events
+  outbox:
+    relay-interval-ms: 1000
+  # S5: non-blocking retries for Booking events (4 attempts, waits 2s, 4s, 8s)
+  retry:
+    attempts: 4
+    delay-ms: 2000
+    multiplier: 2.0
+  # S8: reconciliation safety net
+  reconciliation:
+    enabled: true
+    interval-ms: 60000        # how often the job runs
+    grace-seconds: 60         # only look at items older than this (do not race the normal flow)
+    booking-lookback-minutes: 60
+  provider: simulated
+  provider-timeout-ms: 3000
+  sync-interval-ms: 30000
+  max-sync-attempts: 20
+  simulator:
+    default-outcome: SUCCESS
+    latency-ms: 0
+    hang-ms: 30000
+    # lets callers pick the simulated outcome (success/failure/timeout) for tests and demos.
+    # MUST be false in any real environment.
+    allow-client-outcome: true
+
+tickethub:
+  kafka:
+    payment-events-topic: payment-events
+    booking-events-topic: booking-events
+  clients:
+    booking-service:
+      base-url: http://booking-service
+      connect-timeout-ms: 1000
+      read-timeout-ms: 3000
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      bookingService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        ignore-exceptions:
+          - com.tickethub.payment.common.exception.ResourceNotFoundException
+          - com.tickethub.payment.common.exception.BusinessRuleException
+      paymentProvider:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
+  retry:
+    instances:
+      bookingService:
+        max-attempts: 3
+        wait-duration: 300ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - com.tickethub.payment.common.exception.DependencyUnavailableException
+          - com.tickethub.payment.common.exception.DependencyTimeoutException

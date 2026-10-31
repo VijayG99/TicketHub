@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: apigate-service
+  config:
+    import: "configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
+  cloud:
+    config:
+      fail-fast: true
+
+# Only bootstrap values live here. Everything else comes from the Config Server.
+# Secrets are read from environment variables and are never committed.
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{correlationId:-}]"
+
+tickethub:
+  security:
+    jwt-secret: ${JWT_SECRET}
+    jwt-ttl-minutes: 60
+    dev-token-enabled: ${DEV_TOKEN_ENABLED:false}
+    dev-admin-key: ${DEV_ADMIN_KEY:}
+    # Keycloak (ST-15): enable with KEYCLOAK_ENABLED=true and start the stack with the "iam" profile.
+    keycloak:
+      enabled: ${KEYCLOAK_ENABLED:false}
+      jwks-uri: ${KEYCLOAK_JWKS_URI:http://keycloak:8080/realms/tickethub/protocol/openid-connect/certs}
+      issuer: ${KEYCLOAK_ISSUER:http://localhost:8180/realms/tickethub}

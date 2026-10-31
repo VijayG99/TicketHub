@@ -1,0 +1,78 @@
+server:
+  port: 8084
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5444/notification_db
+    username: tickethub
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+  kafka:
+    consumer:
+      # this service's OWN consumer group (ST-20)
+      group-id: notification-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      concurrency: 3
+  mail:
+    host: localhost
+    port: 1025
+
+tickethub:
+  kafka:
+    booking-confirmed-topic: booking-confirmed
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      emailProvider:                      # S10: opens after repeated SMTP failures
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 6
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 2
+      pushProvider:                       # ST-79: the second channel has its own breaker
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 6
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+  ratelimiter:
+    instances:
+      emailProvider:                      # S10: at most 5 emails per second
+        limit-for-period: 5
+        limit-refresh-period: 1s
+        timeout-duration: 2s
+
+notification:
+  # S10/S1 non-blocking retries: 4 attempts in total, waits of 3s, 6s, 12s between them
+  retry:
+    attempts: 4
+    delay-ms: 3000
+    multiplier: 2.0
+  # S11 lab: set e.g. 2000 to make each message take 2s (see scripts/lag-lab.sh)
+  simulated-delay-ms: 0
+  # S12: true only in the replay profile (rebuild records, never send)
+  replay-mode: false
+  # ST-79: second channel (simulated push). false = only email is created.
+  push:
+    enabled: true
+  # log = development sender, email = SMTP (MailHog locally, a real provider via secrets)
+  sender: log
+  mail:
+    from: no-reply@tickethub.local

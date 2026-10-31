@@ -1,0 +1,10 @@
+# Example override for ST-31 (RDS). Use:  docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+# Replace the host names with your RDS endpoints and set TICKETHUB_PROFILES=docker,aws in .env.
+# Passwords are NOT written here: export POSTGRES_PASSWORD (or inject SPRING_DATASOURCE_PASSWORD) from your secret store.
+services:
+  config-server:
+    environment:
+      EVENT_DB_HOST: replace-me-event.xxxxxx.ap-south-1.rds.amazonaws.com
+      BOOKING_DB_HOST: replace-me-booking.xxxxxx.ap-south-1.rds.amazonaws.com
+      PAYMENT_DB_HOST: replace-me-payment.xxxxxx.ap-south-1.rds.amazonaws.com
+      NOTIFICATION_DB_HOST: replace-me-notification.xxxxxx.ap-south-1.rds.amazonaws.com

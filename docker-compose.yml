@@ -1,0 +1,476 @@
+# TicketHub - full local / integration stack. One command:  docker compose up -d --build
+# Stop:  docker compose down        (add -v to also delete database/Kafka volumes)
+#
+# Always on : 4 databases, Kafka, MailHog, MinIO (S3), Eureka, Config Server, 5 services,
+#             Prometheus, Grafana, Jaeger
+# Opt-in    : --profile iam    Keycloak (+ its database)
+#             --profile elk    Elasticsearch, Logstash, Kibana (also set TICKETHUB_PROFILES=docker,elk in .env)
+#             --profile tools  Kafka UI
+#             --profile full   everything above
+name: tickethub
+
+services:
+  # ------------------------------------------------------------------ databases (one per service)
+  event-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: event_db
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    ports:
+      - "5441:5432"
+    volumes:
+      - event-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d event_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  booking-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: booking_db
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    ports:
+      - "5442:5432"
+    volumes:
+      - booking-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d booking_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  payment-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    ports:
+      - "5443:5432"
+    volumes:
+      - payment-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d payment_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  notification-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    ports:
+      - "5444:5432"
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d notification_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------------ Kafka (single-node KRaft, no ZooKeeper)
+  kafka:
+    image: apache/kafka:3.8.0
+    restart: unless-stopped
+    ports:
+      - "29092:29092"          # host access for local (non-docker) runs and CLI demos
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka-ui:                    # S0: always on now -> http://localhost:8090 (topics, offsets, consumer groups, lag)
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: tickethub
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+
+  # ------------------------------------------------------------------ controlled email test environment
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "8025:8025"            # web UI + API: http://localhost:8025 (SMTP 1025 stays internal)
+
+  # ------------------------------------------------------------------ platform
+  eureka-server:
+    build: ./eureka-server
+    image: tickethub/eureka-server:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "8761:8761"            # discovery dashboard
+
+  config-server:
+    build: ./config-server
+    image: tickethub/config-server:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "8888:8888"            # inspect config: http://localhost:8888/event-service/docker
+
+  # ------------------------------------------------------------------ business services
+  # Internal service ports are intentionally NOT published: clients can only enter through the gateway.
+  event-service:
+    build: ./event-service
+    image: tickethub/event-service:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      event-db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      TICKETHUB_SECURITY_INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}   # ST-76: empty = off
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
+
+  booking-service:
+    build: ./booking-service
+    image: tickethub/booking-service:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      booking-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      TICKETHUB_SECURITY_INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}   # ST-76: empty = off
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+
+  payment-service:
+    build: ./payment-service
+    image: tickethub/payment-service:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      payment-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      TICKETHUB_SECURITY_INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}   # ST-76: empty = off
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?Set PAYMENT_WEBHOOK_SECRET in .env}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+
+  notification-service:
+    build: ./notification-service
+    image: tickethub/notification-service:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      notification-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # ---- S12 replay: a SECOND notification instance with its own empty DB and a NEW consumer group.
+  # Start with: docker compose --profile replay up -d notification-replay-db notification-replay
+  notification-replay-db:
+    image: postgres:16.4-alpine
+    profiles: ["replay"]
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d notification_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  notification-replay:
+    build: ./notification-service
+    image: tickethub/notification-service:${TICKETHUB_TAG:-latest}
+    profiles: ["replay"]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      notification-replay-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,replay
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8094:8084"
+
+  apigate-service:
+    build: ./apigate-service
+    image: tickethub/apigate-service:${TICKETHUB_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      event-service:
+        condition: service_healthy
+      booking-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
+      TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
+      CONFIG_SERVER_URL: http://config-server:8888
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET (min 32 chars) in .env}
+      DEV_TOKEN_ENABLED: ${DEV_TOKEN_ENABLED:-false}
+      DEV_ADMIN_KEY: ${DEV_ADMIN_KEY:-}
+      KEYCLOAK_ENABLED: ${KEYCLOAK_ENABLED:-false}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8180/realms/tickethub}
+      KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/tickethub/protocol/openid-connect/certs}
+    ports:
+      - "8080:8080"            # the ONLY business entry point
+
+  # ------------------------------------------------------------------ object storage (ST-30)
+#  minio:
+#    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+#    restart: unless-stopped
+#    command: server /data --console-address ":9001"
+#    environment:
+#      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
+#      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
+#    ports:
+#      - "9000:9000"            # S3 API; also serves the public poster URLs
+#      - "9001:9001"            # MinIO console: http://localhost:9001
+#    volumes:
+#      - minio-data:/data
+#
+#  minio-init:                  # one-shot: creates the bucket and makes posters publicly readable
+#    image: quay.io/minio/mc:latest
+#    restart: "no"
+#    depends_on:
+#      - minio
+#    environment:
+#      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
+#      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
+#    entrypoint: ["/bin/sh", "-c"]
+#    command:
+#      - |
+#        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done
+#        mc mb --ignore-existing local/tickethub-media
+#        mc anonymous set download local/tickethub-media
+#        # ST-78: keep old versions of overwritten/deleted objects, and expire them after 30 days (best effort: mc flags differ by version)
+#        mc version enable local/tickethub-media || echo "versioning not enabled (non-fatal)"
+#        mc ilm rule add --noncurrent-expire-days 30 local/tickethub-media || echo "lifecycle rule not added (non-fatal)"
+#        echo "bucket tickethub-media ready"
+
+  # ------------------------------------------------------------------ metrics, dashboards, tracing (ST-27, ST-28)
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"            # http://localhost:9090
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - jaeger
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"            # http://localhost:3000  (dashboard: TicketHub Overview)
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"          # Jaeger UI: http://localhost:16686  (OTLP/HTTP 4318 stays internal)
+
+  # ------------------------------------------------------------------ Keycloak (ST-15)  --profile iam
+  keycloak-db:
+    image: postgres:16.4-alpine
+    profiles: ["iam", "full"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${POSTGRES_USER:-tickethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example)}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.6
+    profiles: ["iam", "full"]
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-tickethub}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin12345}
+    volumes:
+      - ./keycloak/realm:/opt/keycloak/data/import:ro
+    ports:
+      - "8180:8080"            # http://localhost:8180  (realm "tickethub")
+
+  # ------------------------------------------------------------------ ELK log stack (ST-26)  --profile elk
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    profiles: ["elk", "full"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.3
+    profiles: ["elk", "full"]
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+    volumes:
+      - ./observability/logstash/pipeline:/usr/share/logstash/pipeline:ro
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    profiles: ["elk", "full"]
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"            # http://localhost:5601
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status | grep -q available || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  kibana-setup:                # one-shot: creates the "tickethub-logs-*" data view
+    image: curlimages/curl:8.10.1
+    profiles: ["elk", "full"]
+    restart: "no"
+    depends_on:
+      kibana:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        curl -s -X POST http://kibana:5601/api/data_views/data_view \
+          -H 'kbn-xsrf: true' -H 'Content-Type: application/json' \
+          -d '{"data_view":{"title":"tickethub-logs-*","name":"TicketHub logs","timeFieldName":"@timestamp"}}' \
+          && echo "data view created"
+
+volumes:
+  event-db-data:
+  booking-db-data:
+  payment-db-data:
+  notification-db-data:
+  kafka-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+  keycloak-db-data:
+  elasticsearch-data:

@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 2000
+        response-timeout: 15s
+      routes:
+        - id: event-service
+          uri: lb://event-service
+          predicates:
+            - Path=/events/**,/venues/**,/shows/**
+        - id: booking-service
+          uri: lb://booking-service
+          predicates:
+            - Path=/bookings/**
+        - id: payment-service
+          uri: lb://payment-service
+          predicates:
+            - Path=/payments/**
+        - id: notification-service
+          uri: lb://notification-service
+          predicates:
+            - Path=/notifications/**
+
+# Actuator (health, prometheus) is served on a separate, unpublished port so metrics are never
+# reachable through the public gateway port 8080 (ST-27).
+management:
+  server:
+    port: 8089

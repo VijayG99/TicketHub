@@ -1,0 +1,3 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://booking-db:5432/booking_db

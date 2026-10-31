@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Aggregator only: lets you build every service with one command (mvn clean verify).
+         Each module is independently buildable and has its own Dockerfile. -->
+    <groupId>com.tickethub</groupId>
+    <artifactId>tickethub</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>TicketHub</name>
+
+    <modules>
+        <module>eureka-server</module>
+        <module>config-server</module>
+        <module>apigate-service</module>
+        <module>event-service</module>
+        <module>booking-service</module>
+        <module>payment-service</module>
+        <module>notification-service</module>
+    </modules>
+</project>
