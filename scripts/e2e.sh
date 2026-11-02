@@ -63,11 +63,29 @@ echo "== 2. admin builds the catalogue"
 call POST /events "$ADMIN" '{"title":"Space Odyssey Premiere","description":"Opening night","type":"MOVIE"}'; expect 201 "create event (DRAFT)"; EVENT=$(field .id)
 call PATCH "/events/$EVENT/status" "$ADMIN" '{"status":"PUBLISHED"}'; expect 200 "publish event"
 if [ "${CHECK_POSTER:-1}" = "1" ]; then
-  printf '\x89PNG\r\n\x1a\n' > /tmp/th_poster.png
-  STATUS=$(curl -sS -X POST "$BASE/events/$EVENT/poster" -H "Authorization: Bearer $ADMIN" -F "file=@/tmp/th_poster.png;type=image/png" -o /tmp/th_body -w '%{http_code}'); BODY=$(cat /tmp/th_body)
+  POSTER_FILE=$(cygpath -m /tmp/th_poster.png)
+
+  STATUS=$(curl -sS -X POST "$BASE/events/$EVENT/poster" \
+    -H "Authorization: Bearer $ADMIN" \
+    -F "file=@${POSTER_FILE};type=image/png" \
+    -o /tmp/th_body -w '%{http_code}')
+
+  BODY=$(cat /tmp/th_body)
+
   expect 200 "ST-30 poster uploaded to object storage"
-  POSTER=$(field .posterUrl); [ -n "$POSTER" ] && [ "$POSTER" != null ] || { echo "FAIL: no posterUrl returned"; exit 1; }
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$POSTER")" = 200 ] || { echo "FAIL: poster URL not publicly readable: $POSTER"; exit 1; }
+
+  POSTER=$(field .posterUrl)
+
+  [ -n "$POSTER" ] && [ "$POSTER" != null ] || {
+    echo "FAIL: no posterUrl returned"
+    exit 1
+  }
+
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$POSTER")" = 200 ] || {
+    echo "FAIL: poster URL not publicly readable: $POSTER"
+    exit 1
+  }
+
   echo "  ok poster is publicly readable: $POSTER"
 fi
 call POST /venues "$ADMIN" '{"name":"Grand Cinema","city":"Bengaluru","address":"MG Road"}'; expect 201 "create venue"; VENUE=$(field .id)

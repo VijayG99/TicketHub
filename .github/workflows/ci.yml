@@ -1,10 +1,10 @@
-name: CI
+name: TicketHub CI
 
 on:
-  pull_request:
   push:
     branches: [main]
-    tags: ["v*"]
+  pull_request:
+    branches: [main]
 
 jobs:
   build-test:
@@ -34,11 +34,11 @@ jobs:
 
   integration:
     # Starts the real stack and runs the production-style flows against it (ST-62, ST-08, ST-33).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: docker-images
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Create .env from the example
         run: cp .env.example .env
       - name: Start the stack

@@ -154,6 +154,8 @@ services:
         condition: service_healthy
       event-db:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       SPRING_PROFILES_ACTIVE: ${TICKETHUB_PROFILES:-docker}
       TICKETHUB_LOG_APPENDER: ${TICKETHUB_LOG_APPENDER:-JSON}
@@ -291,37 +293,39 @@ services:
       - "8080:8080"            # the ONLY business entry point
 
   # ------------------------------------------------------------------ object storage (ST-30)
-#  minio:
-#    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
-#    restart: unless-stopped
-#    command: server /data --console-address ":9001"
-#    environment:
-#      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
-#      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
-#    ports:
-#      - "9000:9000"            # S3 API; also serves the public poster URLs
-#      - "9001:9001"            # MinIO console: http://localhost:9001
-#    volumes:
-#      - minio-data:/data
-#
-#  minio-init:                  # one-shot: creates the bucket and makes posters publicly readable
-#    image: quay.io/minio/mc:latest
-#    restart: "no"
-#    depends_on:
-#      - minio
-#    environment:
-#      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
-#      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
-#    entrypoint: ["/bin/sh", "-c"]
-#    command:
-#      - |
-#        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done
-#        mc mb --ignore-existing local/tickethub-media
-#        mc anonymous set download local/tickethub-media
-#        # ST-78: keep old versions of overwritten/deleted objects, and expire them after 30 days (best effort: mc flags differ by version)
-#        mc version enable local/tickethub-media || echo "versioning not enabled (non-fatal)"
-#        mc ilm rule add --noncurrent-expire-days 30 local/tickethub-media || echo "lifecycle rule not added (non-fatal)"
-#        echo "bucket tickethub-media ready"
+  minio:
+    image: docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
+      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+
+  minio-init:
+    image: docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z
+    restart: "no"
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-tickethub-minio}
+      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-tickethub-minio-secret}
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        until mcli alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 2
+        done
+        mcli mb --ignore-existing local/tickethub-media
+        mcli anonymous set download local/tickethub-media
+        mcli version enable local/tickethub-media || true
+        mcli ilm rule add --noncurrent-expire-days 30 local/tickethub-media || true
+        echo "bucket tickethub-media ready"
 
   # ------------------------------------------------------------------ metrics, dashboards, tracing (ST-27, ST-28)
   prometheus:
