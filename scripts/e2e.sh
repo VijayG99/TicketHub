@@ -62,8 +62,19 @@ fi
 echo "== 2. admin builds the catalogue"
 call POST /events "$ADMIN" '{"title":"Space Odyssey Premiere","description":"Opening night","type":"MOVIE"}'; expect 201 "create event (DRAFT)"; EVENT=$(field .id)
 call PATCH "/events/$EVENT/status" "$ADMIN" '{"status":"PUBLISHED"}'; expect 200 "publish event"
+
 if [ "${CHECK_POSTER:-1}" = "1" ]; then
-  POSTER_FILE=$(cygpath -m /tmp/th_poster.png)
+
+  # Generate a valid 1x1 PNG fixture on every OS
+  printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC' \
+    | base64 -d > /tmp/th_poster.png
+
+  # Windows Git Bash needs cygpath; Ubuntu uses the normal Linux path
+  if command -v cygpath >/dev/null 2>&1; then
+    POSTER_FILE=$(cygpath -m /tmp/th_poster.png)
+  else
+    POSTER_FILE=/tmp/th_poster.png
+  fi
 
   STATUS=$(curl -sS -X POST "$BASE/events/$EVENT/poster" \
     -H "Authorization: Bearer $ADMIN" \
@@ -124,7 +135,16 @@ for i in $(seq 1 30); do
 done
 [ "${TOTAL:-0}" -ge 1 ] || { echo "FAIL: no email arrived in MailHog ($MAILHOG)"; exit 1; }
 echo "  ok confirmation email delivered ($TOTAL message(s) in MailHog)"
-call GET "/notifications?bookingId=$BOOKING" "$ADMIN"; expect 200 "admin sees notification record"; [ "$(field '([.content[]|select(.channel=="EMAIL")][0].status)')" = SENT ] || { echo "FAIL: email notification not SENT"; exit 1; }
+call GET "/notifications?bookingId=$BOOKING" "$ADMIN"
+expect 200 "admin sees notification record"
+
+echo "DEBUG: Notification API response:"
+echo "$BODY" | jq .
+
+[ "$(field '([.content[]|select(.channel=="EMAIL")][0].status)')" = SENT ] || {
+  echo "FAIL: email notification not SENT"
+  exit 1
+}
 [ "$(field '([.content[]|select(.channel=="PUSH")][0].status)')" = SENT ] || { echo "FAIL: ST-79 push notification not SENT"; exit 1; }
 echo "  ok ST-79 both channels delivered (EMAIL via SMTP, PUSH simulated)"
 
